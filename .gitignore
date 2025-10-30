@@ -1,0 +1,8 @@
+# ignore evidence artifacts and binaries
+challenges/*/evidence/
+**/evidence/
+*.so
+*.img
+*.raw
+flag.txt
+evidence/
