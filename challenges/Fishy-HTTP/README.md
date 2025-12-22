@@ -92,7 +92,7 @@ extract_first_letters(file_path)
 
 ![alt text](image-8.png)
 
-➡️ Thu được **phần 1 của flag**:
+-> Thu được **phần 1 của flag**:
 
 ```text
 h77P_s73417hy_revSHELL}
@@ -182,7 +182,7 @@ HTB{Th4ts_d07n37_
 
 ---
 
-## 4️⃣ Kết quả
+## 4 Kết quả
 
 Ghép 2 phần flag:
 
@@ -194,9 +194,10 @@ HTB{Th4ts_d07n37_h77P_s73417hy_revSHELL}
 
 ---
 
-## 5️⃣ Kết luận & Bài học rút ra
+## 5 Kết luận & Bài học rút ra
 
 - Wireshark giúp nhanh chóng xác định traffic HTTP và các stream chứa payload
 - Việc trích xuất dữ liệu rồi viết script tự động giúp giảm sai sót so với làm thủ công
 - Detect It Easy hỗ trợ phân loại binary nhanh
 - dotPeek rất hữu ích để phân tích logic ẩn trong file .NET
+
