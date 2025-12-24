@@ -1,84 +1,177 @@
-# Nghiên cứu về các loại Bằng Chứng Số (Digital Artifacts)  
-**Challenge:** Suspicious Threat – Hack The Box  
+#  DFIR REPORT  
+## Incident: Suspicious Threat – Hack The Box
 
-
-
----
-
-## 1. Khái niệm về Artifact trong Điều tra số
-
-**Artifact (bằng chứng số)** là mọi dữ liệu được tạo ra trong quá trình một hệ thống, ứng dụng hoặc người dùng hoạt động.  
-Trong điều tra số (digital forensics), artifact là các dấu vết giúp điều tra viên:
-
-- Xác định hành vi của người dùng hoặc mã độc  
-- Tái dựng lại chuỗi sự kiện  
-- Phát hiện xâm nhập, rootkit, hoặc thao túng hệ thống  
-
-### Các nhóm artifact phổ biến
-| Nhóm | Mô tả | Ví dụ |
-|------|-------|--------|
-| **Hệ thống (System Artifacts)** | Dữ liệu phản ánh cấu trúc hệ điều hành, thư viện, tiến trình | `ld.so.preload`, `/etc/passwd`, `.bash_history` |
-| **Tập tin & Thư viện (File / Binary Artifacts)** | File thực thi, thư viện động, script… có thể bị sửa đổi hoặc chèn mã độc | `libc.hook.so.6`, `libproc.so` |
-| **Nhật ký (Log Artifacts)** | Dấu vết hoạt động được hệ thống ghi lại | `/var/log/auth.log`, `dmesg`, `journalctl` |
-| **Bộ nhớ & tiến trình (Memory Artifacts)** | Phần dữ liệu trong RAM khi chương trình đang chạy | Dump tiến trình, thông tin process |
-| **Người dùng (User Artifacts)** | Hoạt động, lệnh, file của người dùng | `~/.bash_history`, `Downloads/`, config cá nhân |
+**Difficulty:** Easy  
+**Category:** Digital Forensics & Incident Response (DFIR)  
 
 ---
 
-## 2. Artifact được đề cập trong Challenge *Suspicious Threat*
+## 1 Executive Summary
 
-### 2.1. `/etc/ld.so.preload`
-- **Loại:** System configuration artifact  
-- **Mô tả:**  
-  File cấu hình này cho phép nạp thêm thư viện động (*shared library*) trước khi chạy bất kỳ chương trình nào.  
-  Kẻ tấn công thường lợi dụng nó để “preload” một thư viện độc hại (rootkit userland).  
-- **Ý nghĩa điều tra:**  
-  - Là chỉ dấu quan trọng để phát hiện rootkit cấp người dùng.  
-  - Phân tích đường dẫn bên trong giúp xác định vị trí thư viện độc hại.  
+Trong quá trình giám sát hệ thống, nhóm SOC phát hiện một máy chủ Linux có dấu hiệu bất thường liên quan đến **thư viện động bị can thiệp**. Điều tra cho thấy hệ thống đã bị nhiễm **userland rootkit** thông qua cơ chế **LD_PRELOAD**, cho phép kẻ tấn công che giấu file và tiến trình độc hại.
+
+Rootkit được sử dụng để ẩn một thư mục trong `/var/`. Sau khi xác định và loại bỏ thư viện độc hại, hệ thống được xác nhận không còn dấu hiệu persistence.
 
 ---
 
-### 2.2. `libc.hook.so.6`
-- **Loại:** Binary / Library artifact  
-- **Mô tả:**  
-  Đây là thư viện giả mạo `libc.so.6` – một thư viện hệ thống chuẩn của Linux.  
-  Trong challenge, kẻ tấn công thay thế liên kết thư viện này để giấu tiến trình và file (rootkit dạng preload).  
-- **Kỹ thuật phân tích:**  
-  - Sử dụng `ldd`, `readelf`, `strings` để xác định hành vi bất thường.  
-  - Tính hash SHA256 để so sánh với bản gốc.  
+## 2 Incident Overview
+
+| Thuộc tính | Mô tả |
+|----------|------|
+| Hệ điều hành | Linux |
+| Dấu hiệu ban đầu | Lệnh hệ thống hoạt động bất thường |
+| Loại tấn công | Userland Rootkit |
+| Kỹ thuật chính | Library Hooking (LD_PRELOAD) |
+| Mức độ ảnh hưởng | Medium |
+| Dữ liệu điều tra | Hệ thống live (SSH access) |
 
 ---
 
-### 2.3. `/var/pr3l04d_/flag.txt`
-- **Loại:** User / File artifact  
-- **Mô tả:**  
-  Là file bị ẩn bởi rootkit, nằm trong thư mục bị thao túng (`pr3l04d_`).  
-- **Ý nghĩa điều tra:**  
-  - Chứng minh rõ việc rootkit đã được gỡ bỏ.  
-  - Là bằng chứng kết luận về hành vi che giấu dữ liệu (anti-forensics).
+## 3 Scope & Impact Assessment
+
+### Hệ thống bị ảnh hưởng
+- Máy chủ Linux (môi trường mô phỏng)
+
+### Tác động
+- Che giấu file và thư mục
+- Có khả năng ẩn tiến trình và hành vi độc hại
+- Tạo điều kiện cho attacker duy trì truy cập
+
+ Không phát hiện:
+- Rò rỉ dữ liệu
+- Kết nối Command & Control ra bên ngoài
 
 ---
 
-## 3. Cách thu thập và bảo quản artifact
-| Bước | Mục tiêu | Công cụ gợi ý |
-|------|-----------|---------------|
-| **1. Xác định và cô lập hệ thống** | Tránh bị rootkit xóa dấu vết | `ssh`, `netstat`, `ps aux` |
-| **2. Thu thập file và thư viện liên quan** | Lưu bản sao không thay đổi | `cp`, `dd`, `tar` |
-| **3. Phân tích thư viện và cấu hình** | Phát hiện hành vi hook | `ldd`, `strings`, `readelf`, `objdump` |
-| **4. Ghi nhận hash & metadata** | Đảm bảo tính toàn vẹn bằng chứng | `sha256sum`, `file`, `stat` |
+## 4 Attack Analysis
+
+### 4.1 Initial Detection
+
+Trong quá trình kiểm tra hệ thống:
+- Kết quả từ các lệnh như `ls` không phản ánh đầy đủ nội dung thư mục
+- Xuất hiện nghi vấn các hàm hệ thống đã bị hook
 
 ---
 
-## 4. Kết luận
+### 4.2 Library Manipulation Discovery
 
-Trong challenge *Suspicious Threat*, ta gặp hai loại artifact điển hình:
-1. **System Artifact:** `/etc/ld.so.preload`
-2. **Binary Artifact:** `libc.hook.so.6`
+Thực hiện kiểm tra thư viện động của binary hệ thống:
 
-Chúng đại diện cho kỹ thuật **Userland Rootkit Injection** – thao túng hành vi hệ thống bằng preload library.  
-Hiểu và phân tích đúng các artifact này giúp điều tra viên:
-- Phát hiện sự hiện diện của mã độc ở tầng userland  
-- Khôi phục các hành vi bị che giấu  
-- Củng cố chuỗi bằng chứng kỹ thuật trong báo cáo pháp chứng.
+```bash
+ldd /bin/ls
+```
+
+Phát hiện thư viện **bất thường**:
+
+```text
+libc.hook.so.6
+```
+
+ Thư viện này **không thuộc thư viện hệ thống chuẩn**, cho thấy:
+- Cơ chế LD_PRELOAD đã bị lợi dụng
+- Các hàm như `readdir()` và `fopen()` có khả năng đã bị hook
 
 ---
+
+### 4.3 Rootkit Identification
+
+- Thư viện `libc.hook.so.6` được xác định là **userland rootkit**
+- Rootkit không cần kernel module
+- Mục đích chính:
+  - Che giấu file
+  - Né tránh các phương pháp kiểm tra thông thường
+
+---
+
+### 4.4 Hidden Artifact Discovery
+
+Sau khi vô hiệu hóa rootkit, tiến hành kiểm tra lại filesystem:
+
+```bash
+ls -ahl /var/
+```
+
+Phát hiện thư mục trước đó bị ẩn:
+
+```text
+/var/pr3l04d_
+```
+
+Bên trong chứa file:
+
+```bash
+/var/pr3l04d_/flag.txt
+```
+
+---
+
+## 5 Evidence & Artifacts
+
+| Artifact | Mô tả |
+|--------|------|
+| libc.hook.so.6 | Thư viện rootkit userland |
+| /var/pr3l04d_ | Thư mục bị che giấu |
+| flag.txt | Minh chứng hoạt động của rootkit |
+
+---
+
+## 6 Timeline of Events
+
+| Thời điểm | Sự kiện | Bằng chứng |
+|--------|-------|----------|
+| T0 | Hệ thống có hành vi bất thường | Output `ls` |
+| T1 | Phát hiện thư viện lạ | `ldd /bin/ls` |
+| T2 | Xác định userland rootkit | libc.hook.so.6 |
+| T3 | Vô hiệu hóa rootkit | Gỡ thư viện |
+| T4 | Phát hiện artifact bị ẩn | /var/pr3l04d_ |
+
+---
+
+## 7 Remediation & Recovery
+
+###  Các bước xử lý
+
+- Gỡ bỏ thư viện độc hại:
+```bash
+rm -rf /lib/x86_64-linux-gnu/libc.hook.so.6
+```
+
+- Tái tạo linker cache:
+```bash
+ldconfig
+```
+
+- Kiểm tra lại biến môi trường:
+```bash
+env | grep LD_
+```
+
+---
+
+## 8 Lessons Learned & Recommendations
+
+### Bài học rút ra
+- Userland rootkit có thể rất hiệu quả dù không cần quyền kernel
+- LD_PRELOAD là một vector tấn công nguy hiểm nhưng thường bị bỏ sót
+
+### Khuyến nghị
+- Giám sát integrity thư viện hệ thống
+- Audit biến môi trường (LD_PRELOAD, LD_LIBRARY_PATH)
+- Hạn chế quyền ghi vào `/lib` và `/usr/lib`
+- Sử dụng công cụ phát hiện rootkit định kỳ
+
+---
+
+## 9 Mapping MITRE ATT&CK
+
+| Technique | ID |
+|---------|----|
+| Shared Library Hijacking | T1574.002 |
+| Defense Evasion | TA0005 |
+| Persistence | TA0003 |
+
+---
+
+## 10 Conclusion
+
+Sự cố cho thấy **userland rootkit** có thể che giấu hiệu quả các dấu vết tấn công mà không cần can thiệp kernel. Phân tích thư viện động là bước then chốt trong điều tra DFIR và phản ứng sự cố trên hệ thống Linux.
