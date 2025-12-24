@@ -36,7 +36,7 @@
 ![alt text](image-2.png)
 
 - Sao chép đoạn mã và chạy trong PowerShell
-![alt text](<Screenshot 2025-11-18 163038.png>)
+![alt text](image-4.png)
 
 ---
 
@@ -107,3 +107,4 @@ HTB{4n0th3R_d4Y_AnoThEr_pH1Sh}
 - Phân tích hành vi bằng **any.run** giúp nhanh chóng phát hiện logic độc hại
 - Nhận diện kỹ thuật **XOR encoding** là chìa khóa để giải mã dữ liệu ẩn
 - PowerShell thường được sử dụng để làm rối và che giấu payload trong các chiến dịch phishing
+
