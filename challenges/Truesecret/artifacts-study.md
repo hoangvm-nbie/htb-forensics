@@ -1,49 +1,237 @@
-**Challenge:** TrueSecret - Hack The Box
+# DFIR INCIDENT REPORT  
+## Case: TrueSecret – Hack The Box
 
+**Difficulty:** Easy  
+**Category:** Forensics / Memory Analysis  
+**Incident Type:** Advanced Persistent Threat (APT) – Custom C2  
+**Primary Evidence:** Memory Dump (RAM)  
+**Tools Used:** Volatility 2, VeraCrypt, Custom Decrypt Script  
 
 ---
 
-## 1. Artifact được đề cập trong Challenge
-### 1.File System Artifacts (Hệ thống Tệp) 
- 1. Định nghĩa & Vai trò
- a) Định nghĩa: 
- - File System Artifacts là các bằng chứng nằm trên hệ thống lưu trữ (ổ cứng), không phải trong RAM hay Network. Chúng bao gồm các tệp dữ liệu được tạo ra, truy cập hoặc sửa đổi trong quá trình tấn công
- b) Vai trò Forensics:
- + Chứa Payload: Lưu trữ các tệp mã độc, công cụ tấn công (như $7zFM.exe$, $DumpIt.exe$) và đặc biệt là tệp dữ liệu bị mã hóa ($archive.zip$, $backup.dat.tc$).
- + Chứng minh Hành động: Metadata của tệp (MAC times: Modified, Accessed, Created) cho biết khi nào kẻ tấn công tương tác với tệp.
- + Tìm kiếm Dữ liệu Bí mật: Là nơi cuối cùng chứa Volume mã hóa TrueCrypt và sau đó là Mã nguồn C2 sau khi giải mã.
- 2. Cách trích & Công cụ
- - Các artifact này được trích xuất từ hình ảnh ổ đĩa vật lý (disk image) hoặc trong trường hợp này, thông qua việc giải nén và mount volume:
- + Tệp Nén (archive.zip): Trích xuất từ File System của Image hoặc được xác định qua $cmdline$.
- + Volume TrueCrypt (backup.dat.tc): Tệp nhị phân được tìm thấy sau khi giải nén.
- + Mã nguồn C2 (.cs files): Được trích xuất sau khi mount thành công tệp $backup.dat.tc$ bằng mật khẩu khôi phục từ RAM.
- 3. Chỉ dấu & IOC cần quan tâm
- + Tên tệp đáng ngờ: $backup.dat$, $TrueCrypt.exe$, tên tệp Mã nguồn C2.
- + Phần mở rộng lạ: $.tc$ (TrueCrypt Volume).Đường dẫn: $C:\Users\User\Documents\Backup\archive.zip$ (chỉ ra vị trí lưu trữ).
- + MAC Times: Nếu thời gian tạo ($Creation Time$) của $archive.zip$ trùng khớp với thời gian $7zFM.exe$ được chạy trong $cmdline$ của RAM.
- 4. Ý nghĩa Pháp chứngBằng chứng Hiện hữu: 
- + Chứng minh dữ liệu nhạy cảm (Mã nguồn C2) đã được lưu trữ trên máy tính của thủ lĩnh APT.
- + Tái tạo Kịch bản: Cho thấy chuỗi hành động rõ ràng: Mã hóa $\rightarrow$ Nén $\rightarrow$ Lưu trữ.
- + Chứng minh Giả định: Việc tìm thấy tệp $backup.dat.tc$ xác nhận giả định về việc sử dụng TrueCrypt, điều này củng cố tính chính xác của Artifact RAM (TrueCrypt Passphrase).
+## 1 Executive Summary
 
- ### 2.Volatile Memory Artifacts (Bộ nhớ RAM)
- 1. Định nghĩa & Vai trò
- - Định nghĩa: Volatile Memory Artifacts là các bằng chứng chỉ tồn tại khi hệ thống đang hoạt động và sẽ bị mất khi tắt nguồn. Chúng được thu thập thông qua file Memory Dump ($TrueSecrets.raw$).
- - Vai trò Forensics:
- + Khóa Mã hóa & Mật khẩu: RAM lưu trữ các khóa bí mật được sử dụng bởi các ứng dụng đang hoạt động (ví dụ: mật khẩu TrueCrypt).
- + Hoạt động Hiện tại: Cung cấp danh sách các tiến trình, kết nối mạng, các lệnh đã thực thi mà chưa được ghi vào ổ đĩa.
- + Dữ liệu Fileless: Có thể chứa các mã độc được tiêm vào tiến trình hoặc các script chỉ chạy trong bộ nhớ.
- 2. Cách trích & Công cụ
- - Tất cả các artifacts này được trích xuất từ file $TrueSecrets.raw$.
- + Công cụ chính: Volatility Frameworkpslist/pstree: Trích xuất danh sách tiến trình ($TrueCrypt.exe$, $7zFM.exe$, $DumpIt.exe$).
- + cmdline: Trích xuất các đối số dòng lệnh đầy đủ (Full Command Line) cho tiến trình $7zFM.exe$.
- + truecryptpassphrase: Module chuyên biệt để quét các cấu trúc dữ liệu của TrueCrypt trong RAM và khôi phục mật khẩu.
- + filescan/hashdump: (Không dùng trong challenge này, nhưng là chức năng quan trọng) Trích xuất các handle tệp đang mở và hash mật khẩu hệ thống.
- 3. Chỉ dấu & IOC cần quan tâm
- + Tiến trình Độc hại: $7zFM.exe$ (hoạt động trong ngữ cảnh đáng ngờ).
- + Key Material: Chuỗi mật khẩu TrueCrypt $X2Hk2XbEJqWYsh8VdbSYg6WpG9g7$.
- + Chuỗi Hoạt động: Chuỗi lệnh đầy đủ của $7zFM.exe$ (Artifact C4).
- 4. Ý nghĩa Pháp chứng
- + Vô hiệu hóa Mã hóa: Việc khôi phục mật khẩu TrueCrypt từ RAM là bằng chứng quyết định cho phép nhà phân tích vượt qua lớp bảo mật mạnh mẽ nhất.
- + Chứng minh Thời điểm: Dữ liệu RAM (tiến trình đang chạy) xác nhận thời điểm hành động cuối cùng của đối tượng (chạy $7zFM.exe$) đã xảy ra ngay trước khi bị thu giữ.
- + Khôi phục Dữ liệu Cố định: Các artifacts trong RAM (như chuỗi lệnh) cung cấp các thông tin liên kết trực tiếp đến các artifact trên ổ đĩa (như tên file $archive.zip$), tạo ra một chuỗi bằng chứng không thể chối cãi.
+Trong quá trình điều tra sau khi bắt giữ thủ lĩnh một nhóm APT, lực lượng chức năng đã thu được **memory dump** từ máy tính đang hoạt động của đối tượng. Phân tích bộ nhớ cho thấy nhóm APT này sử dụng một **máy chủ Command & Control (C2) tùy chỉnh**, kết hợp mã hóa volume bằng TrueCrypt nhằm che giấu mã nguồn và dữ liệu nhạy cảm.
+
+Mặc dù sử dụng nhiều lớp bảo vệ, attacker đã mắc sai lầm nghiêm trọng khi **không xóa sạch thông tin nhạy cảm khỏi RAM**, cho phép quá trình memory forensics trích xuất mật khẩu TrueCrypt, truy cập mã nguồn C2 và đảo ngược thuật toán mã hóa giao tiếp.
+
+---
+
+## 2 Incident Overview
+
+| Thuộc tính | Mô tả |
+|----------|------|
+| Threat Actor | APT Group |
+| Initial Evidence | Memory Dump |
+| Malware Type | Custom C2 Server |
+| Encryption Used | TrueCrypt + DES |
+| Key Storage | In-memory |
+| Impact Level | High (C2 infrastructure exposure) |
+
+---
+
+## 3 Scope & Impact Assessment
+
+###  Tài nguyên bị ảnh hưởng
+- Máy tính của thủ lĩnh APT
+- Bộ nhớ RAM tại thời điểm thu giữ
+
+###  Tác động
+- Lộ mã nguồn C2
+- Lộ giao thức giao tiếp C2
+- Lộ key & IV mã hóa
+- Có thể giải mã toàn bộ session đã thu thập
+
+---
+
+## 4 Evidence Collected
+
+| Artifact | Mô tả |
+|--------|------|
+| TrueSecrets.raw | Memory dump |
+| ZIP backup | Trích xuất từ RAM |
+| TrueCrypt container (.tc) | Volume mã hóa |
+| Agent server source | Mã nguồn C2 |
+| Session data | Giao tiếp C2 |
+
+---
+
+## 5 Memory Forensics Analysis
+
+###  5.1 Profile Identification
+
+- Sử dụng Volatility 2
+- Profile phù hợp:
+
+```text
+Win7SP1x86_23418
+```
+
+---
+
+###  5.2 Process Enumeration
+
+Lệnh:
+
+```bash
+vol -f TrueSecrets.raw --profile=Win7SP1x86_23418 pslist
+```
+
+Các process đáng chú ý:
+
+| Process | Nhận định |
+|-------|-----------|
+| TrueCrypt.exe | Volume mã hóa |
+| DumpIt.exe | Tool dump RAM |
+| 7zFM.exe | Giải nén backup |
+| WiMPrvSE.exe | Thường bị giả mạo |
+
+---
+
+###  5.3 Command Line Analysis
+
+Lệnh:
+
+```bash
+vol -f TrueSecrets.raw --profile=Win7SP1x86_23418 cmdline
+```
+
+Phát hiện:
+- `7zFM.exe` được dùng để mở **file ZIP backup**
+- ZIP chứa dữ liệu nhạy cảm liên quan đến C2
+
+---
+
+## 6 File Extraction from Memory
+
+###  6.1 Dump ZIP File
+
+- Trích xuất ZIP trực tiếp từ RAM
+- Thu được các file:
+  - `.dat`
+  - `.vacb`
+
+---
+
+###  6.2 Recover TrueCrypt Container
+
+- Giải nén tiếp các artifact
+- Thu được file:
+
+```text
+*.tc
+```
+
+=> TrueCrypt encrypted volume
+
+---
+
+## 7 Credential Recovery
+
+###  7.1 Extract TrueCrypt Passphrase
+
+- Sử dụng plugin Volatility:
+
+```bash
+vol -f TrueSecrets.raw --profile=Win7SP1x86_23418 truecryptpassphrase
+```
+
+- Passphrase thu được:
+
+```text
+X2Hk2XbEJqWYsh8VdbSYg6WpG9g7
+```
+
+---
+
+###  7.2 Mount Encrypted Volume
+
+- Dùng **VeraCrypt 1.25**
+- Mount thành công container `.tc`
+
+Kết quả:
+- Truy cập được thư mục **agent server**
+- Thu được mã nguồn C2
+
+---
+
+## 8 C2 Malware Analysis
+
+###  8.1 Encryption Mechanism
+
+- Thuật toán: **DES**
+- Đặc điểm:
+  - Key cố định
+  - IV cố định
+- Output:
+  - Ciphertext Base64
+
+=> Thiết kế mã hóa yếu, dễ đảo ngược
+
+---
+
+###  8.2 Decryption
+
+- Viết script giải mã dựa trên:
+  - DES
+  - Key & IV thu được từ source code
+- Giải mã thành công file session
+- Thu được dữ liệu & flag
+
+---
+
+## 9 Attack Flow Reconstruction
+
+```text
+1. APT triển khai C2 server tùy chỉnh
+2. Mã nguồn & session được lưu trong TrueCrypt container
+3. Container được mở trong lúc hệ thống đang chạy
+4. Memory dump được thu thập
+5. Passphrase TrueCrypt bị trích xuất từ RAM
+6. Analyst truy cập C2 source & giải mã session
+```
+
+---
+
+## 10 Root Cause Analysis
+
+###  Sai lầm của attacker
+- Không xóa key & passphrase khỏi RAM
+- Dùng DES với key & IV cố định
+- Lưu source code C2 trong volume đang mount
+
+###  Điểm thành công của DFIR
+- Thu thập RAM kịp thời
+- Áp dụng memory forensics đúng plugin
+- Kết hợp phân tích mã hóa và reverse logic
+
+---
+
+## 11 MITRE ATT&CK Mapping
+
+| Technique | ID |
+|--------|----|
+| Custom C2 Protocol | T1094 |
+| Encrypted Channel | T1573 |
+| Data Encrypted for Impact | T1486 |
+| Credential in Memory | T1003 |
+| Obfuscated Files or Information | T1027 |
+
+---
+
+## 12 Lessons Learned & Recommendations
+
+###  Phòng thủ
+- Luôn thu thập **memory dump** trong incident response
+- Không tin tưởng mã hóa volume nếu key tồn tại trong RAM
+- Giám sát process mount TrueCrypt/VeraCrypt
+
+###  DFIR Insight
+> **RAM luôn là điểm yếu lớn nhất của attacker.  
+Nếu hệ thống đang chạy, bí mật luôn tồn tại trong bộ nhớ.**
+
+---
+
+## 13 Conclusion
+
+Challenge TrueSecret minh họa rõ ràng giá trị cốt lõi của **memory forensics trong điều tra APT**. Dù attacker sử dụng nhiều lớp mã hóa, việc thu thập và phân tích RAM đúng thời điểm đã cho phép trích xuất toàn bộ chuỗi bí mật: từ mật khẩu TrueCrypt, mã nguồn C2 cho tới thuật toán mã hóa và dữ liệu phiên giao tiếp.
