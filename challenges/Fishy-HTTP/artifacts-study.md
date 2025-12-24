@@ -1,139 +1,171 @@
-**Challenge:** Fishy-HTTP - Hack The Box
+#  DFIR REPORT  
+## Incident: Fishy HTTP – Hack The Box
 
-
----
-
-##1. Artifact được đề cập trong Challenge
-
-###1.1 Artifact A — PCAP / HTTP stream (Network artifact)
-
-1. Định nghĩa & vai trò
-
-Định nghĩa: file PCAP lưu lại toàn bộ lưu lượng mạng (packet). Trong challenge, PCAP chứa nhiều luồng HTTP; một luồng HTTP mang theo payload HTML được attacker dùng để giấu dữ liệu (encoding/obfuscation).
-
-Vai trò forensics: PCAP là nguồn chứng cứ thô — nó chứng minh dữ liệu di chuyển qua mạng, cung cấp timestamp, địa chỉ IP, user-agent, SNI/Host header, payload gốc. Quan trọng vì nó cho thấy kênh truyền (exfiltration, C2, payload transfer).
-
-2. Cách trích & công cụ
-
-GUI: Wireshark → File > Open → chọn packet → Analyze > Follow > HTTP Stream → chọn Show data as (ASCII/Raw) → Save as (body).
-
-CLI: tshark/tcpdump
-
-Liệt kê flows:
-tshark -r fishy_http.pcap -qz conv,ip
-
-Liệt kê HTTP hosts/URIs:
-tshark -r fishy_http.pcap -Y http -T fields -e http.host -e http.request.uri
-
-Lấy toàn bộ stream N:
-tshark -r fishy_http.pcap -Y "tcp.stream eq N" -V > streamN.txt
-
-Trích payloads: tshark -r fishy_http.pcap -Y http -T fields -e http.file_data > raw_payloads.txt
-
-Lưu ý bảo toàn bằng chứng: luôn copy pcap gốc read-only, làm checksum (sha256sum fishy_http.pcap) và lưu manifest.
-
-3. Chỉ dấu & IOC cần quan tâm
-
-IP nguồn/đích, port, Host header, User-Agent khác thường.
-
-HTTP method bất thường (POST chứa payload lớn).
-
-Nội dung body có cấu trúc lặp/HTML tag lạ (dấu hiệu stego/encoding).
-
-Thời gian (timestamps) để ghép timeline với các artifact khác.
-
-4. Ý nghĩa pháp chứng
-
-Chứng minh dữ liệu bị truyền/nhận qua network tại thời điểm cụ thể.
-
-Cho phép tái dựng chuỗi sự kiện: ai/đâu/bao giờ gửi payload.
-
-Nếu payload chứa direct evidence (flag/part), pcap là nguồn nguyên gốc để xác minh người thu gửi/nhận.
+**Difficulty:** Easy  
+**Category:** Digital Forensics & Incident Response (DFIR)  
+**Platform:** Hack The Box  
 
 ---
 
-###1.2.Artifact B — Windows binary (.NET) (Binary / Static analysis artifact)
-1. Định nghĩa & vai trò
+## 1 Executive Summary
 
-Định nghĩa: file thực thi Windows được cung cấp trong ZIP. Phân tích tĩnh (Detect It Easy) cho thấy .NET assembly; decompile (dotPeek/dnSpy) tiết lộ logic mã hóa/giải mã (ví dụ mapping tag → hex).
+Trong quá trình điều tra một sự cố bảo mật, nhóm phân tích phát hiện một chương trình khả nghi trên máy người dùng đã thực hiện các yêu cầu HTTP bất thường đến một máy chủ từ xa. Qua phân tích lưu lượng mạng (PCAP) và file nhị phân Windows liên quan, xác định đây là một **malware sử dụng kỹ thuật steganography/obfuscation qua HTTP traffic** nhằm truyền dữ liệu bí mật.
 
-Vai trò forensics: binary chỉ ra thuật toán mà attacker dùng để encode dữ liệu; giúp viết decoder chính xác, chứng minh “cơ chế” (attacker methodology).
-
-2. Cách phân tích & công cụ
-
-Phân loại file: Detect It Easy (DIE) để biết type (PE, .NET, obfuscation).
-
-Decompile: dotPeek/dnSpy/ILSpy — tìm các class tên lạ, method xử lý HTML hoặc base conversion. Tìm mapping (dictionary, array) hoặc chuỗi hằng (hardcoded).
-
-Static checks: strings, r2, ghidra (nếu C++) — tìm hardcoded domain/IP, key, hàm decode.
-
-Ghi chép: chụp màn hình phần code quan trọng, copy đoạn mapping vào file text (tag_hex_mapping.txt), ghi chú dòng lệnh để reproduce.
-
-3. Chỉ dấu & IOC cần quan tâm
-
-Mapping tag → nibble/hex (vd: <cite> = 0, <h1> = 1, ...).
-
-Bất kỳ domain/IP hoặc URL cứng trong string table (C2).
-
-Thủ thuật obfuscation (string encryption, anti-decompile) — ghi chú mất mát/khó phân tích.
-
-4. Ý nghĩa pháp chứng
-
-Binary là bằng chứng về phương pháp: nó cho thấy attacker đã thiết kế encoding cụ thể — từ đó ta chứng minh rằng decode ta làm là cùng thuật toán người tấn công dùng.
-
-Nếu binary chứa IOC (C2), đó là mỏ thông tin để kết nối chiến dịch.
+Malware chia flag thành nhiều phần, được che giấu trong các HTTP stream và mã hóa bằng Base64 cũng như một cơ chế encode HTML tùy chỉnh được cài đặt trong binary .NET.
 
 ---
 
-###1.3.Artifact C — Intermediate encoded data (Extracted payloads / Derived data)
-1. Định nghĩa & vai trò
+## 2 Incident Overview
 
-Định nghĩa: các file/chuỗi được trích xuất từ payload gốc và đã trải qua xử lý tạm (ví dụ: lấy chữ cái đầu mỗi từ → chuỗi Base64 → giải Base64 → phần flag/fragment). Đây là artifact đã qua xử lý, còn gọi derived artifacts.
-
-Vai trò forensics: những file này cho thấy quá trình chuyển đổi dữ liệu từ raw → intermediate → decoded. Chúng giúp chứng minh chain-of-custody và reproducibility.
-
-2. Cách trích & công cụ
-
-Trích từ HTTP body: copy text từ Follow HTTP Stream → lưu zup.txt.
-
-Chạy script trích ký tự đầu: python3 extract_first_letters.py zup.txt > extracted_base64.txt.
-
-Giải mã: base64 --decode extracted_base64.txt > part_flag.txt hoặc CyberChef.
-
-Nếu tiếp tục cần decode bằng mapping: feed phần HTML vào decode_html.py (mapping từ binary) để có decoded_part.txt.
-
-3. Chỉ dấu & IOC cần quan tâm
-
-Kết quả intermediate có thể chứa padding/marker (ví dụ } hoặc HTB{ fragments), giúp xác nhận flag.
-
-Kiểm tra encoding layers (Base64, hex, custom mapping) để không bỏ sót bước.
-
-Lưu hash cho từng intermediate file để chứng minh không bị giả mạo.
-
-4. Ý nghĩa pháp chứng
-
-Cho thấy chuỗi xử lý từ raw → flag; scripts + intermediate files là bằng chứng phương pháp (reproducible).
-
-Nếu ai đó tranh cãi với kết luận, bạn có thể tái tạo exact transformation bằng script + files.
+| Thuộc tính | Mô tả |
+|----------|------|
+| Hệ điều hành | Windows |
+| Dấu hiệu ban đầu | HTTP traffic bất thường |
+| Loại tấn công | Malware giao tiếp qua HTTP |
+| Kỹ thuật chính | Obfuscation, Base64, Custom HTML Encoding |
+| Mức độ ảnh hưởng | Low – Medium |
+| Dữ liệu điều tra | PCAP, Windows binary |
 
 ---
 
-###2. Kết luận
+## 3 Scope & Impact Assessment
 
-Trong challenge **Fishy HTTP** chúng ta đã gặp ba loại artifact then chốt:
+###  Hệ thống bị ảnh hưởng
+- Máy người dùng chạy Windows
+- Một tiến trình gửi HTTP request liên tục đến web server
 
-1. **Network Artifact (PCAP / HTTP stream):** file `fishy_http.pcap` chứa các luồng HTTP; một HTTP stream chứa phần body (HTML) được attacker dùng làm container để ẩn dữ liệu.  
-2. **Binary Artifact (Windows binary .NET):** file nhị phân đi kèm chứa logic mã hoá—decompile cho thấy một mapping `tag -> hex` dùng để giải mã payload HTML.  
-3. **Derived / Intermediate Data:** các file text được trích từ HTTP body và các output của script (`zup.txt` → `extracted_base64.txt` → `part_flag.txt` → `decoded_part.txt`) biểu diễn chuỗi chuyển đổi từ dữ liệu thô đến fragment của flag.
+###  Tác động
+- Truyền dữ liệu bị che giấu qua HTTP
+- Khả năng thực hiện reverse shell
+- Không phát hiện hành vi phá hoại hệ thống hoặc ransomware
 
-Tập hợp các artifact này cho thấy một **kỹ thuật hai lớp**: attacker chèn payload vào traffic HTTP (network steganography/obfuscation), rồi dùng một chương trình (binary) để định nghĩa phương thức mã hoá/giải mã (tag-to-hex mapping). Phân tích chi tiết các artifact (PCAP stream, extracted payloads, scripts, và mã nguồn decompiled) cho phép ta:
+=> Không phát hiện:
+- Lateral movement(di chuyển ngang)
+- Privilege escalation(leo thang đặc quyền)
 
-- Xác nhận nguồn gốc và con đường truyền payload (network evidence);  
-- Phục hồi thuật toán giải mã và tái tạo chính xác các bước decode (reproducible methodology);  
-- Cung cấp chuỗi bằng chứng kỹ thuật rõ ràng để hỗ trợ báo cáo forensics.
+---
 
-**Khuyến nghị ngắn:**  
-- Bảo toàn pcap gốc (read-only) và lưu checksum (sha256) để chứng minh tính toàn vẹn;  
-- Lưu scripts và intermediate outputs (text, screenshots, mapping) để người khác có thể tái dựng quy trình;  
-- Không công khai flag hoặc file nhị phân nhạy cảm trên repo public — thay bằng `HTB{REDACTED}` nếu cần;  
-- Với góc độ phòng ngừa: giám sát traffic HTTP bất thường (payloads dài / nhiều HTML tags lạ), và xác minh binaries lạ bằng phân tích tĩnh trước khi chạy.
+## 4 Attack Analysis
+
+### 4.1 Network Traffic Analysis (PCAP)
+
+- Phân tích file PCAP bằng Wireshark
+- Phát hiện phần lớn traffic là HTTP
+- Một số HTTP stream chứa payload bất thường
+
+Các stream này bao gồm chuỗi phản hồi (feedback) với các ký tự được tô màu đỏ trong Wireshark, cho thấy dữ liệu có chủ đích được chèn vào response.
+
+---
+
+### 4.2 Obfuscated Payload Reconstruction
+
+- Dữ liệu phản hồi HTTP được trích xuất và lưu vào file text
+- Viết script Python để:
+  - Tách từng từ
+  - Lấy ký tự đầu của mỗi từ
+  - Ghép lại thành một chuỗi hoàn chỉnh
+
+Chuỗi thu được sau khi ghép được xác định là **Base64 encoded**.
+
+Sau khi decode Base64, thu được **phần đầu của flag**:
+
+```text
+h77P_s73417hy_revSHELL}
+```
+
+---
+
+### 4.3 Binary Analysis (Windows Executable)
+
+- Phân tích file nhị phân bằng Detect It Easy
+- Xác định:
+  - Binary viết bằng .NET
+  - Có liên kết với C++
+
+- Dùng DotPeek để decompile
+- Phát hiện thư viện và module bất thường trong project
+
+Một hàm encode/decode HTML tùy chỉnh được tìm thấy, cho thấy malware sử dụng các thẻ HTML để biểu diễn dữ liệu hex.
+
+---
+
+### 4.4 Custom HTML Encoding Reversal
+
+- Trích xuất HTTP stream chứa HTML payload
+- Viết script Python để:
+  - Map tên thẻ HTML sang ký tự hex
+  - Ghép chuỗi hex
+  - Convert sang ASCII
+
+Kết quả giải mã cho thấy **phần còn lại của flag**:
+
+```text
+HTB{Th4ts_d07n37_
+```
+
+---
+
+## 5 Evidence & Artifacts
+
+| Artifact | Mô tả |
+|--------|------|
+| PCAP file | Lưu lượng HTTP chứa payload ẩn |
+| Windows binary | Malware .NET |
+| Python scripts | Dùng để decode payload |
+| HTML payload | Dữ liệu mã hóa bằng thẻ HTML |
+
+---
+
+## 6 Timeline of Events
+
+| Thời điểm | Sự kiện | Bằng chứng |
+|--------|-------|----------|
+| T0 | Malware gửi HTTP request | PCAP |
+| T1 | Payload bị chèn vào HTTP response | Stream HTTP |
+| T2 | Trích xuất Base64 payload | Script Python |
+| T3 | Decode phần flag thứ nhất | Base64 decode |
+| T4 | Reverse HTML encoding | Binary analysis |
+| T5 | Thu thập flag hoàn chỉnh | Kết quả decode |
+
+---
+
+## 7 Remediation & Recovery
+
+### Các bước xử lý
+
+- Cô lập máy người dùng bị nhiễm
+- Xóa file nhị phân độc hại
+- Kiểm tra persistence (Startup, Registry, Scheduled Tasks)
+- Giám sát outbound HTTP traffic bất thường
+- Triển khai IDS/IPS cho HTTP anomaly detection
+
+---
+
+## 8 Lessons Learned & Recommendations
+
+### Bài học rút ra
+- HTTP traffic rất dễ bị lợi dụng để che giấu dữ liệu
+- Malware có thể sử dụng encoding tùy chỉnh để né tránh phát hiện
+- Phân tích PCAP kết hợp reverse binary là kỹ năng then chốt trong DFIR
+
+### Khuyến nghị
+- Giám sát nội dung HTTP response, không chỉ request
+- Triển khai SSL inspection (nếu phù hợp)
+- Huấn luyện SOC nhận diện traffic bất thường
+- Kết hợp network forensics và malware analysis
+
+---
+
+## 9 Mapping MITRE ATT&CK
+
+| Technique | ID |
+|---------|----|
+| Obfuscated Files or Information | T1027 |
+| Application Layer Protocol (HTTP) | T1071.001 |
+| Command and Control | TA0011 |
+
+---
+
+## 10 Conclusion
+
+Sự cố Fishy HTTP cho thấy attacker có thể tận dụng giao thức HTTP phổ biến để che giấu hoạt động Command & Control. Việc kết hợp phân tích lưu lượng mạng và reverse engineering malware là chìa khóa để phát hiện và tái tạo toàn bộ hành vi tấn công.
