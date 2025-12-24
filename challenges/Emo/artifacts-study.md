@@ -1,105 +1,155 @@
-**Challenge:** EMO - Hack The Box
+#  DFIR REPORT  
+## Incident: EMO – Hack The Box
 
+**Difficulty:** Easy  
+**Category:** Digital Forensics & Incident Response (DFIR)  
+**Platform:** Hack The Box  
 
 ---
 
-##1. Artifact được đề cập trong Challenge
-### Artifact 1 – Malicious Word Document (.doc/.docx)
-1. Định nghĩa & Vai trò
+## 1 Executive Summary
 
-File Word là vật chứng ban đầu trong challenge. Đây là vector tấn công chính, bên trong chứa macro độc hại được dùng để thực thi PowerShell khi người dùng mở file.
+Trong quá trình điều tra một file Microsoft Word khả nghi, nhóm phân tích phát hiện tài liệu này chứa **mã PowerShell bị obfuscate**, được thiết kế để thực thi payload độc hại khi mở file. Mã độc sử dụng kỹ thuật **XOR encoding** nhằm che giấu dữ liệu, đồng thời tận dụng PowerShell để thực thi mà không cần ghi thêm file xuống đĩa.
 
-2. Cách trích xuất & Công cụ
+Sau khi giải mã payload, flag đã được trích xuất thành công. Không phát hiện dấu hiệu persistence hoặc kết nối Command & Control trong phạm vi bài lab.
 
-oletools (oleid, olevba): phân tích cấu trúc OLE, xem có macro hay không.
+---
 
-ANY.RUN: chạy file trong sandbox để quan sát hành vi runtime.
+## 2 Incident Overview
 
-oledump.py: trích macro thủ công.
+| Thuộc tính | Mô tả |
+|----------|------|
+| Loại file ban đầu | Microsoft Word Document |
+| Dấu hiệu ban đầu | File Office khả nghi |
+| Loại tấn công | Malicious Document |
+| Kỹ thuật chính | PowerShell Obfuscation, XOR Encoding |
+| Mức độ ảnh hưởng | Low |
+| Dữ liệu điều tra | File DOC, hành vi PowerShell |
 
-3. Chỉ dấu & IOC quan tâm
+---
 
-File Word có macro auto-run.
+## 3 Scope & Impact Assessment
 
-Khi mở sẽ spawn PowerShell → dấu hiệu tài liệu độc hại.
+### Hệ thống bị ảnh hưởng
+- Máy người dùng mở file Word độc hại
 
-File chứa mã hóa XOR payload.
+### Tác động
+- Thực thi PowerShell script bị che giấu
+- Giải mã và xử lý dữ liệu trong bộ nhớ
+- Không phát hiện ghi file độc hại ra hệ thống
 
-4. Ý nghĩa pháp chứng
+ Không phát hiện:
+- Persistence
+- Privilege escalation
+- Lateral movement
 
-Là bằng chứng gốc cho thấy người dùng đã nhận và mở file lừa đảo.
+---
 
-Chứa macro → chứng minh ý đồ thực thi mã độc.
+## 4 Attack Analysis
 
-Dùng để truy xuất nguồn gốc tấn công và tái tạo hành vi tấn công.
-### Artifact 2 – Macro VBA / Embedded Script
-1. Định nghĩa & Vai trò
+### 4.1 Initial File Analysis
 
-Macro VBA là đoạn script được nhúng trong file Word, đóng vai trò loader, chứa mã độc PowerShell bị obfuscate. Khi nạn nhân mở tài liệu, macro sẽ kích hoạt.
+- File Word được phân tích ban đầu
+- Phát hiện hành vi bất thường liên quan đến PowerShell
+- File được upload lên môi trường phân tích động (any.run)
 
-2. Cách trích xuất & Công cụ
+Kết quả cho thấy file thực thi một đoạn PowerShell script ngay khi mở.
 
-olevba file.doc → trích toàn bộ macro.
+---
 
-ANY.RUN → tự động hiển thị macro và chuỗi code.
+### 4.2 PowerShell Payload Identification
 
-oledump.py -V → liệt kê stream macro.
+- Trong quá trình phân tích hành vi, phát hiện đoạn mã PowerShell obfuscate
+- Script chứa biến `FN5ggmsH` được sử dụng để lưu trữ dữ liệu dạng số
 
-3. Chỉ dấu & IOC quan tâm
+Ví dụ:
 
-Tên biến bị obfuscate:
+```powershell
+$FN5ggmsH += (186,141,228,182,177,171,...)
+```
 
-$FN5ggmsH, $Odb3hf3, $Zhcnaux
+- Ngoài ra, script sử dụng phép toán:
 
+```text
+byte ^ 0xdf
+```
 
-Sử dụng backticks trong PowerShell:
+📌 Đây là dấu hiệu của **XOR encoding** với key `0xdf`
 
-"dO`WnLOA`dfILe"
+---
 
+### 4.3 Deobfuscation & Decoding
 
-Macro thực thi PowerShell — hành vi cực kỳ đáng ngờ.
+- Trích xuất toàn bộ dãy số trong biến `FN5ggmsH`
+- Sử dụng công cụ CyberChef để:
+  - Áp dụng XOR với key `0xdf`
+  - Chuyển kết quả sang ASCII
 
-4. Ý nghĩa pháp chứng
+Kết quả giải mã cho thấy flag được che giấu trong payload.
 
-Giải thích cơ chế tấn công nội tại của file Word.
+---
 
-Giúp tái hiện quá trình decode payload.
+## 5 Evidence & Artifacts
 
-Cung cấp bằng chứng kỹ thuật để xây dựng YARA rule phát hiện macro malware.
+| Artifact | Mô tả |
+|--------|------|
+| File Word | Tài liệu Office độc hại |
+| PowerShell script | Payload bị obfuscate |
+| XOR key | `0xdf` |
+| Decoded output | Flag |
 
-### Artifact 3 – Obfuscated PowerShell Payload
-1. Định nghĩa & Vai trò
+---
 
-Đây là đoạn PowerShell được sinh ra bởi macro. Code bị obfuscate bằng backticks, trick string, XOR…
-Vai trò của nó là giải mã payload ẩn, trong challenge chính là flag.
+## 6 Timeline of Events
 
-2. Cách trích xuất & Công cụ
+| Thời điểm | Sự kiện | Bằng chứng |
+|--------|-------|----------|
+| T0 | File Word được mở | File DOC |
+| T1 | PowerShell script được thực thi | any.run |
+| T2 | Dữ liệu XOR được xử lý | Script analysis |
+| T3 | Payload được decode | CyberChef |
+| T4 | Flag được trích xuất | Decoded output |
 
-Copy từ ANY.RUN hoặc từ macro VBA.
+---
 
-Làm sạch code → chạy thử trong PowerShell.
+## 7 Remediation & Recovery
 
-Dùng CyberChef để giải mã XOR các dãy byte.
+###  Các bước xử lý
 
-3. Chỉ dấu & IOC quan tâm
+- Không mở file Word từ nguồn không tin cậy
+- Vô hiệu hóa macro và PowerShell không cần thiết
+- Áp dụng chính sách:
+  - Constrained Language Mode cho PowerShell
+  - AMSI & Script Block Logging
+- Đào tạo người dùng về phishing document
 
-XOR 0xDF → kỹ thuật mã hóa payload:
+---
 
-([byte][char]$_ -bxor 0xdf)
+## 8 Lessons Learned & Recommendations
 
+###  Bài học rút ra
+- File Office là vector tấn công phổ biến
+- Obfuscation bằng XOR rất đơn giản nhưng hiệu quả
+- PowerShell thường được dùng để thực thi mã độc không file (fileless)
 
-Dữ liệu mã hóa dưới dạng mảng số:
+### Khuyến nghị
+- Giám sát PowerShell activity
+- Block Office spawning PowerShell
+- Dùng sandbox để phân tích file đáng ngờ
+- Kết hợp static + dynamic analysis khi điều tra document malware
 
-(186,141,228,...)
-(185,179,190,...)
+---
 
+## 9 Mapping MITRE ATT&CK
 
-Hành vi đọc byte và build chuỗi vào biến $FN5ggmsH.
+| Technique | ID |
+|---------|----|
+| Obfuscated Files or Information | T1027 |
+| PowerShell | T1059.001 |
+| User Execution | T1204 |
 
-4. Ý nghĩa pháp chứng
+---
 
-Chỉ ra payload cuối cùng mà attacker muốn ẩn.
+## 10 Conclusion
 
-Giúp phân tích được nội dung thực (flag trong bài, C2 hoặc shellcode trong thực tế).
-
-Cho phép xác định mức độ nguy hiểm và kỹ thuật obfuscation được sử dụng.
+Sự cố EMO cho thấy mức độ nguy hiểm của các tài liệu Office chứa mã độc obfuscate. Mặc dù kỹ thuật XOR đơn giản, việc kết hợp với PowerShell giúp attacker dễ dàng vượt qua kiểm tra thủ công. Phân tích DFIR tập trung vào hành vi runtime và giải mã payload là chìa khóa để phát hiện và xử lý loại mối đe dọa này.
