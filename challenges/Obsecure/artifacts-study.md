@@ -1,121 +1,240 @@
-**Challenge:** Obsecure - Hack The Box
+# DFIR INCIDENT REPORT  
+## Case: Obsecure – Hack The Box
 
+**Difficulty:** Easy  
+**Category:** Forensics / Network / Web  
+**Incident Type:** Webshell Intrusion & Post-Exploitation  
+**Data Source:** PCAP, Malicious PHP Script  
 
 ---
-## 1. Artifact được đề cập trong Challenge
 
-### 1.1 Artifact A — File PCAP / HTTP Streams (Network Artifact)
-1. Định nghĩa & vai trò
+## 1 Executive Summary
 
-Định nghĩa:
-File PCAP ghi lại toàn bộ traffic mạng trong thời điểm xảy ra sự kiện. Trong challenge này, PCAP chứa một chuỗi các HTTP streams, trong đó attacker sử dụng POST request để truyền payload đã được mã hóa nhằm giao tiếp với webshell.
+Một hệ thống web production đã bị kẻ tấn công lợi dụng **lỗ hổng upload file tùy ý** để tải lên một **webshell PHP (support.php)**. Sau khi phát hiện sự cố, dịch vụ HTTP đã bị tắt, chỉ còn lại **log mạng (PCAP)** trong khoảng **2 phút trước thời điểm phát hiện**.
 
-Vai trò forensics:
-PCAP là bằng chứng mạng quan trọng nhất vì nó:
+Qua phân tích webshell và lưu lượng mạng, xác định attacker đã:
+- Thực thi lệnh hệ thống từ xa thông qua webshell
+- Liệt kê người dùng và thư mục
+- Truy cập thư mục home của developer
+- Trích xuất file cơ sở dữ liệu KeePass (`pwdb.kdbx`)
+- Crack mật khẩu KeePass và thu được flag
 
-Lưu lại các gói tin HTTP chứa payload mã hóa.
+---
 
-Cho phép khôi phục toàn bộ lệnh attacker gửi qua webshell (uid, id, ls, dump file...).
+## 2 Incident Overview
 
-Tái dựng timeline dựa trên timestamp trong từng stream.
+| Thuộc tính | Mô tả |
+|----------|------|
+| Vector tấn công | Arbitrary File Upload |
+| Payload | PHP Webshell |
+| Kênh C2 | HTTP POST |
+| Kỹ thuật mã hóa | Base64 + Repeating-key XOR + Gzip |
+| Dữ liệu bị truy cập | File KeePass |
+| Mức độ ảnh hưởng | Medium |
 
-Xác định rõ nguồn – đích – nội dung trao đổi (C2 traffic).
+---
 
-2. Cách trích & công cụ
+## 3 Scope & Impact Assessment
 
-GUI – Wireshark:
+###  Tài nguyên bị ảnh hưởng
+- Web server (PHP)
+- User directory `/home/developer`
+- File nhạy cảm: `pwdb.kdbx`
 
-File → Open → chọn pcap
+###  Tác động
+- Remote Command Execution
+- Data Exfiltration
+- Credential compromise
 
-Chuột phải một packet → Follow → HTTP Stream
+ Không phát hiện:
+- Persistence
+- Privilege escalation
+- Lateral movement
 
-Chuyển sang Raw/ASCII để xem payload
+---
 
-Export stream để phân tích nội dung
-3. Chỉ dấu & IOC cần quan tâm
+## 4 Evidence Collection
 
-POST requests có payload dài và Base64-like.
+| Artifact | Mô tả |
+|--------|------|
+| PCAP | Log mạng 2 phút trước sự cố |
+| support.php | Webshell độc hại |
+| Decoded payload | Lệnh attacker |
+| pwdb.kdbx | KeePass database |
 
-Encoded payload giữa hai marker đặc biệt (kh/kf).
+---
 
-Không có tham số HTTP thông thường → dấu hiệu C2.
+## 5 Malware / Webshell Analysis
 
-Timestamp cho thấy chuỗi lệnh liên tiếp phục vụ lateral movement.
+###  5.1 Webshell Behavior Overview
 
-HTTP replies nén gzip, cấu trúc bất thường.
+File `support.php` sử dụng các kỹ thuật:
+- Obfuscation bằng `create_function`
+- Mã hóa dữ liệu bằng **Repeating-key XOR**
+- Giao tiếp qua HTTP POST (`php://input`)
 
-4. Ý nghĩa pháp chứng
+---
 
-Cho thấy rõ attacker sử dụng webshell thông qua HTTP POST.
+###  5.2 Cryptographic Logic
 
-Cho phép giải mã và tái dựng toàn bộ lệnh đã chạy.
+**Hàm mã hóa chính:**
 
-Chứng minh file pwdb.kdbx đã bị exfiltrate.
+- Hàm `x($t, $k)`:
+  - XOR từng byte dữ liệu với key `$k`
+  - Repeating-key XOR (đối xứng)
 
-Là nền tảng để kết nối các artifact khác (PHP payload, XOR decoding, timeline).
-### 1.2 Artifact B — Backdoor PHP File (Malicious Code Artifact)
-1. Định nghĩa & vai trò
+**Chuỗi xử lý dữ liệu:**
 
-Định nghĩa:
-File PHP trong challenge là malware/backdoor dùng để nhận lệnh từ attacker. Nó sử dụng XOR + Base64 + gzip để che giấu dữ liệu và thực thi payload thông qua hàm createfunction.
+```text
+Client → Base64 → XOR → PHP
+PHP → XOR → Gzip → Response
+```
 
-Vai trò forensics:
+---
 
-Giải thích cơ chế mã hóa của traffic bên trong PCAP.
+###  5.3 Input Processing
 
-Là mẫu mã độc giúp giải mã tất cả HTTP payloads.
+- Webshell đọc input từ:
+```php
+@file_get_contents("php://input")
+```
 
-Chứng minh server bị cấy webshell → pivot point để attacker điều khiển.
+- Trích xuất payload giữa hai chuỗi marker `$kh` và `$kf`
+- Giải mã:
+  1. Base64 decode
+  2. XOR với key `$k`
+- Thực thi lệnh
+- Thu output bằng output buffer
 
-2. Cách trích & công cụ
-Xem code:
-Editor (VSCode)
-Online PHP sandbox (OnlineGDB, 3v4l.org)
-Reverse XOR:
-Sử dụng script Python hoặc chạy trực tiếp trong PHP.
+---
 
-Bảo toàn mẫu malware:
+## 6 Network Traffic Analysis (PCAP)
 
-Copy file dạng read-only
+###  6.1 HTTP Stream Reconstruction
 
-Hash SHA-256 để phục vụ chain-of-custody
+- Dùng Wireshark → **Follow HTTP Stream**
+- Thu được dữ liệu mã hóa:
 
-3. Chỉ dấu & IOC
-Hàm x() (XOR lặp) — dấu hiệu obfuscated C2.
-Sử dụng preg_match() để tách dữ liệu giữa hai marker ($kh, $kf).
-createfunction() — hàm nguy hiểm dùng để thực thi mã tùy ý.
-Base64 + Gzip — kỹ thuật che giấu payload.
+```text
+Input:
+6f8af44abea0QKwu/Xr7GuFo50p4HuAZHBfnqhv7/+ccFfisfH4bYOSMRi0eGPgZuRd6SPsdGP//c+dVM7gnYSWvlINZmlWQGyDpzCowpzczRely/Q351039f4a7b5
+```
 
-4. Ý nghĩa pháp chứng
-Là artifact giúp giải mã toàn bộ traffic trong PCAP.
-Cho phép tái dựng chính xác nội dung attacker gửi → phục vụ timeline.
-Dùng làm bằng chứng malware implant trên hệ thống.
-### 1.3 Artifact C — KeePass Database (pwdb.kdbx)
-1. Định nghĩa & vai trò
-Định nghĩa:
-pwdb.kdbx là file cơ sở dữ liệu mật khẩu KeePass mà attacker đã truy cập và dump từ /home/developer. Đây là file bị đánh cắp trong quá trình tấn công.
-Vai trò forensics:
-Cho thấy dấu hiệu rõ ràng của data exfiltration.
-Là mục tiêu cuối cùng mà attacker nhắm tới.
-Dùng để kiểm chứng việc attacker có truy cập được thông tin nhạy cảm hay không.
-2. Cách trích & công cụ
+---
 
-Trích từ PCAP:
+###  6.2 Decryption Process
 
-Follow HTTP Stream → Save payload → lưu đúng dạng binary .kdbx
+- Không thể decode trực tiếp
+- Áp dụng lại logic hàm `x()`:
+  - Base64 decode
+  - XOR ngược với key
 
-Crack mật khẩu:
-Convert KDBX → John format
-Mở file:
-KeePassXc
-KeePass2
-3. IOC cần quan tâm
-Tên file và đường dẫn: /home/developer/pwdb.kdbx
-Dung lượng file trong payload HTTP
-Hash của file để đối chiếu: SHA-256
-4. Ý nghĩa pháp chứng
-Xác nhận attacker truy cập và đánh cắp dữ liệu nhạy cảm.
+---
 
-Việc crack thành công mật khẩu chứng minh integrity của quá trình phân tích.
+## 7 Attacker Command Reconstruction
 
-Lấy flag từ file giúp xác nhận chuỗi tấn công hoàn chỉnh.
+Sau khi giải mã các stream:
+
+###  Stream 1
+- Thu thập thông tin hệ thống:
+```bash
+id
+uid=...
+```
+
+---
+
+###  Stream 23–25
+- Hành vi attacker:
+
+```text
+ls -lah /home
+cd /home/developer
+dump pwdb.kdbx
+```
+
+---
+
+## 8 Timeline of Events
+
+| Thời điểm | Hành động | Bằng chứng |
+|--------|----------|-----------|
+| T0 | Webshell nhận POST request | PCAP |
+| T1 | Attacker chạy `id` | Stream 1 |
+| T2 | Liệt kê `/home` | Stream 23 |
+| T3 | Truy cập `/home/developer` | Stream 24 |
+| T4 | Dump KeePass DB | Stream 25 |
+
+---
+
+## 9 Credential Compromise
+
+###  9.1 KeePass Extraction
+- Dữ liệu dump được lưu thành:
+```text
+pwdb.kdbx
+```
+
+###  9.2 Password Cracking
+- Chuyển sang hash:
+```bash
+keepass2john pwdb.kdbx
+```
+
+- Crack bằng Hashcat
+- Mở KeePass thành công
+
+---
+
+## 10 Flag Recovered
+
+```text
+HTB{pr0tect_y0_shellZ}
+```
+
+---
+
+## 11 Root Cause Analysis
+
+###  Nguyên nhân gốc
+- Lỗ hổng upload file tùy ý
+- Không kiểm soát file PHP upload
+- Không sandbox web process
+
+###  Điểm yếu chính
+- Không WAF
+- Không giám sát outbound traffic
+- Không kiểm tra nội dung POST bất thường
+
+---
+
+## 12 Remediation & Recommendations
+
+###  Khắc phục
+- Disable upload PHP
+- Validate MIME & extension
+- Chạy webserver với user hạn chế quyền
+- Giám sát HTTP POST bất thường
+
+###  Phòng thủ lâu dài
+- IDS/IPS
+- File Integrity Monitoring
+- Centralized logging
+
+---
+
+## 13 MITRE ATT&CK Mapping
+
+| Technique | ID |
+|---------|----|
+| Exploit Public-Facing Application | T1190 |
+| Web Shell | T1505.003 |
+| Obfuscated Files or Information | T1027 |
+| Command Execution | T1059 |
+| Credential Access | T1555 |
+
+---
+
+## 14 Conclusion
+
+Incident Obsecure minh họa rõ ràng cách một **webshell PHP được obfuscate** có thể bị phân tích ngược thông qua **DFIR workflow**: từ mã độc → PCAP → decrypt payload → tái dựng timeline → đánh giá tác động. Đây là một kịch bản thực tế sát môi trường SOC khi dịch vụ đã bị shutdown và **log mạng là nguồn bằng chứng duy nhất**.
